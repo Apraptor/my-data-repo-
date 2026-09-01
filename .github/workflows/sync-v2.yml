@@ -1,0 +1,35 @@
+name: Sync Pogo Data (v2 Pipeline)
+
+on:
+  schedule:
+    - cron: '30 6 * * *' # Runs daily at 06:30 UTC
+  workflow_dispatch:     # Allows manual triggering for your testing
+
+permissions:
+  contents: write
+
+jobs:
+  sync-v2:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run v2 Pipeline Script
+        run: python3 sync_data_pipeline.py
+
+      - name: Commit and Push Changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-update v2 data pipeline [skip ci]"
+          file_pattern: "pogo_*.json"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
