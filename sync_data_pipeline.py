@@ -29,7 +29,13 @@ def format_name(raw_id: str) -> str:
     return raw_id.replace("_", " ").title()
 
 def normalize_form_modifier(form_part: str) -> str:
-    mapping = {"alola": "alolan", "galar": "galarian", "hisui": "hisuian", "paldea": "paldean"}
+    mapping = {
+        "alola": "alolan", 
+        "galar": "galarian", 
+        "hisui": "hisuian", 
+        "paldea": "paldean",
+        "a": "armored"
+    }
     return mapping.get(form_part, form_part)
 
 def get_file_stats(filename: str) -> dict:
@@ -54,7 +60,7 @@ def build_pipeline():
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     
     # ---------------------------------------------------------
-    # 1. PARSE MOVES
+    # 1. PARSE MOVES & BUILD RESOLVERS
     # ---------------------------------------------------------
     moves_list = []
     move_id_map = {} 
@@ -89,6 +95,13 @@ def build_pipeline():
             moves_list.append(move_obj)
 
     valid_moves = {m["id"] for m in moves_list}
+    
+    # Resolver to map PvPoke's stripped fast move strings back to Game Master IDs (e.g. rollout -> rollout_fast)
+    pvpoke_move_resolver = {}
+    for m in valid_moves:
+        pvpoke_move_resolver[m] = m
+        if m.endswith("_fast"):
+            pvpoke_move_resolver[m[:-5]] = m
 
     # ---------------------------------------------------------
     # 2. PARSE CORE (POKEMON & SETTINGS)
@@ -100,8 +113,6 @@ def build_pipeline():
         "shadowStardustMultiplier": 1.2, "shadowCandyMultiplier": 1.2,
         "purifiedStardustMultiplier": 0.9, "purifiedCandyMultiplier": 0.9
     }
-    
-    base_stats_cache = {}
 
     for entry in raw_gm:
         tid = entry.get("templateId", "")
@@ -126,29 +137,16 @@ def build_pipeline():
             if "SHADOW" in form or "PURIFIED" in form:
                 continue
 
-            # Strip _NORMAL and apply adjective mapping
             form_part = form.replace(raw_pokemon_id, "").strip("_").lower()
             form_part = form_part.replace("normal", "").strip("_")
             form_part = normalize_form_modifier(form_part)
             
             normalized_id = f"{raw_pokemon_id.lower()}_{form_part}" if form_part else raw_pokemon_id.lower()
-            base_key = raw_pokemon_id.lower()
             
             stats = p.get("stats") or {}
             types = [normalize_type(p.get("type"))]
             if p.get("type2"): types.append(normalize_type(p.get("type2")))
             
-            # Meaningful deduplication
-            is_base = (form_part == "")
-            if is_base:
-                base_stats_cache[base_key] = {"stats": stats, "types": types}
-            else:
-                is_regional = form_part in ["alolan", "galarian", "hisuian", "paldean"]
-                base_ref = base_stats_cache.get(base_key)
-                if base_ref and not is_regional:
-                    if base_ref["stats"] == stats and base_ref["types"] == types:
-                        continue # Cosmetic duplicate
-
             def resolve_moves(move_list):
                 return [move_id_map.get(str(m), str(m).lower()) for m in move_list if str(m) in move_id_map]
 
@@ -166,7 +164,14 @@ def build_pipeline():
                     "fastMoves": resolve_moves(p.get("quickMoves", [])),
                     "chargedMoves": resolve_moves(p.get("cinematicMoves", [])),
                     "eliteFastMoves": resolve_moves(p.get("eliteQuickMove", [])),
-                    "eliteChargedMoves": resolve_moves(p.get("eliteCinematicMove", []))
+                    "eliteChargedMoves": resolve_moves(p.get("eliteCinematicMove", [])),
+                    
+                    # Temporary fields strictly used for the Tuple dedup algorithm below
+                    "_stats_tuple": (
+                        stats.get("baseAttack", 0), stats.get("baseDefense", 0), stats.get("baseStamina", 0),
+                        types[0], types[1] if len(types) > 1 else ""
+                    ),
+                    "_base_pokemon_id": raw_pokemon_id.lower()
                 }
                 
                 if not s_obj["eliteFastMoves"]: del s_obj["eliteFastMoves"]
@@ -191,7 +196,6 @@ def build_pipeline():
                 
                 evo_id = f"{evo_base}_{evo_form_part}" if evo_form_part else evo_base
                 
-                # Save a fallback_id for remapping cosmetic duplicates during validation
                 e_obj = {"id": evo_id, "fallback_id": evo_base, "candy": evo.get("candyCost", 0)}
                 if "candyCostPurified" in evo: e_obj["candyPurified"] = evo["candyCostPurified"]
                 if "evolutionItemRequirement" in evo: e_obj["item"] = evo["evolutionItemRequirement"].replace("ITEM_", "").lower()
@@ -233,7 +237,39 @@ def build_pipeline():
                 current_species["megaEvolutions"] = megas
 
     # ---------------------------------------------------------
-    # Validation 1: Fail-fast and remap cosmetic forms
+    # 2.5 APPLY TUPLE DEDUPLICATION RULE
+    # ---------------------------------------------------------
+    grouped_by_base = {}
+    for s in species_map.values():
+        grouped_by_base.setdefault(s["_base_pokemon_id"], []).append(s)
+        
+    deduped_species_list = []
+    for base_id, forms in grouped_by_base.items():
+        # Group by the exact (atk, def, hp, type1, type2) tuple
+        tuple_groups = {}
+        for f in forms:
+            tuple_groups.setdefault(f["_stats_tuple"], []).append(f)
+            
+        for t_key, f_list in tuple_groups.items():
+            # If multiple forms have the EXACT same stats and types, we pick the most canonical one.
+            # Priority: 0 = Base Form, 1 = Recognized Regional/Armored, 2 = Cosmetic
+            def form_priority(x):
+                if x["form"] is None: return 0
+                if x["form"] in ["alolan", "galarian", "hisuian", "paldean", "armored"]: return 1
+                return 2
+            
+            best_form = sorted(f_list, key=form_priority)[0]
+            
+            # Clean up algorithm keys before writing to JSON
+            del best_form["_stats_tuple"]
+            del best_form["_base_pokemon_id"]
+            deduped_species_list.append(best_form)
+            
+    # Rebuild map with only the surviving unique species
+    species_map = {s["id"]: s for s in deduped_species_list}
+
+    # ---------------------------------------------------------
+    # Validation 1: Fail-fast and remap cosmetic evolution edges
     # ---------------------------------------------------------
     valid_species_ids = set(species_map.keys())
     species_list = list(species_map.values())
@@ -248,19 +284,19 @@ def build_pipeline():
             if target_id not in valid_species_ids:
                 resolved = False
                 
-                # 1. Check if the fallback base exists directly (e.g., dudunsparce)
+                # Check 1: Fallback base exists directly (e.g. dudunsparce)
                 if fallback_id in valid_species_ids:
                     target_id = fallback_id
                     resolved = True
                 
-                # 2. Check if the target is just missing a Niantic suffix (e.g., dudunsparce_two -> dudunsparce_two_segment)
+                # Check 2: Target is just missing a Niantic suffix
                 if not resolved:
                     matches = [k for k in valid_species_ids if k.startswith(target_id)]
                     if matches:
                         target_id = matches[0]
                         resolved = True
                         
-                # 3. Check if base is missing a suffix (e.g., pumpkaboo -> pumpkaboo_average)
+                # Check 3: Base is missing a suffix (e.g. pumpkaboo -> pumpkaboo_average)
                 if not resolved:
                     matches = [k for k in valid_species_ids if k.startswith(fallback_id)]
                     if matches:
@@ -268,10 +304,8 @@ def build_pipeline():
                         resolved = True
                         
                 if not resolved:
-                    # CHANGED STRING: If this error doesn't say "(base:", you know GitHub isn't running the latest code!
                     raise ValueError(f"CRITICAL: Target '{target_id}' (base: {fallback_id}) from '{s['id']}' doesn't resolve!")
             
-            # Deduplicate (so Dudunsparce only shows one unified evolution edge)
             if target_id not in seen_evos:
                 evo["id"] = target_id
                 valid_evos.append(evo)
@@ -304,15 +338,19 @@ def build_pipeline():
             is_shadow = species_id.endswith("_shadow")
             base_id = species_id.replace("_shadow", "")
             
-            # Validation 2: Ensure PvPoke species and moves resolve cleanly
             if base_id not in valid_species_ids:
                 continue 
                 
             moveset = []
             for m in entry.get("moveset", []):
-                m_low = m.lower()
+                # Resolve PvPoke's "rollout" back to our valid "rollout_fast" mapping
+                m_low = pvpoke_move_resolver.get(m.lower(), m.lower())
                 if m_low in valid_moves:
                     moveset.append(m_low)
+
+            # Validation 2: Ensure fast move is present at index 0 and resolves correctly
+            if not moveset or not moveset[0].endswith("_fast"):
+                raise ValueError(f"CRITICAL: Moveset {moveset} for '{base_id}' in {league} is missing a fast move at position 0!")
 
             league_arr.append({
                 "id": base_id,
