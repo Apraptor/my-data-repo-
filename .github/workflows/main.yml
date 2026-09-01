@@ -1,36 +1,35 @@
-name: Update Pokémon GO & PvPoke Data
+name: Sync Pokémon GO Game Master
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * *' # Daily at 06:00 UTC
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  sync-data:
+  sync-pogo:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetches full history so git push / rebase never gets rejected
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Run Update Script
+      - name: Run Game Master Update
         run: python3 update_pogo_data.py
 
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-update Pokémon GO & PvPoke game data [skip ci]"
-          file_pattern: "clean_pogo_data.json meta_rankings.json version.json"
+          commit_message: "Auto-update Game Master data [skip ci]"
+          file_pattern: "clean_pogo_data.json version.json"
           commit_user_name: "github-actions[bot]"
           commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
