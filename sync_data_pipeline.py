@@ -192,7 +192,7 @@ def build_pipeline():
 
             # Megas
             megas = []
-            evo_overrides = {o["tempEvoId"]: o for o in p.get("tempEvoOverrides", [])}
+            evo_overrides = {o.get("tempEvoId"): o for o in p.get("tempEvoOverrides", []) if o.get("tempEvoId")}
             
             for temp in p.get("temporaryEvolutionBranch", []):
                 temp_id_raw = temp.get("temporaryEvolution", "")
