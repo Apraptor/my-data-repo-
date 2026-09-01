@@ -24,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Run Update Script
-        run: python3 sync_game_data.py
+        run: python3 update_pogo_data.py
 
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
