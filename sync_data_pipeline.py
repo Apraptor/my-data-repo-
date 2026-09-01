@@ -96,7 +96,7 @@ def build_pipeline():
 
     valid_moves = {m["id"] for m in moves_list}
     
-    # Resolver to map PvPoke's stripped fast move strings back to Game Master IDs (e.g. rollout -> rollout_fast)
+    # Resolver to map PvPoke's stripped strings back to Game Master IDs (e.g. rollout -> rollout_fast)
     pvpoke_move_resolver = {}
     for m in valid_moves:
         pvpoke_move_resolver[m] = m
@@ -245,27 +245,21 @@ def build_pipeline():
         
     deduped_species_list = []
     for base_id, forms in grouped_by_base.items():
-        # Group by the exact (atk, def, hp, type1, type2) tuple
         tuple_groups = {}
         for f in forms:
             tuple_groups.setdefault(f["_stats_tuple"], []).append(f)
             
         for t_key, f_list in tuple_groups.items():
-            # If multiple forms have the EXACT same stats and types, we pick the most canonical one.
-            # Priority: 0 = Base Form, 1 = Recognized Regional/Armored, 2 = Cosmetic
             def form_priority(x):
                 if x["form"] is None: return 0
                 if x["form"] in ["alolan", "galarian", "hisuian", "paldean", "armored"]: return 1
                 return 2
             
             best_form = sorted(f_list, key=form_priority)[0]
-            
-            # Clean up algorithm keys before writing to JSON
             del best_form["_stats_tuple"]
             del best_form["_base_pokemon_id"]
             deduped_species_list.append(best_form)
             
-    # Rebuild map with only the surviving unique species
     species_map = {s["id"]: s for s in deduped_species_list}
 
     # ---------------------------------------------------------
@@ -283,20 +277,16 @@ def build_pipeline():
             
             if target_id not in valid_species_ids:
                 resolved = False
-                
-                # Check 1: Fallback base exists directly (e.g. dudunsparce)
                 if fallback_id in valid_species_ids:
                     target_id = fallback_id
                     resolved = True
                 
-                # Check 2: Target is just missing a Niantic suffix
                 if not resolved:
                     matches = [k for k in valid_species_ids if k.startswith(target_id)]
                     if matches:
                         target_id = matches[0]
                         resolved = True
                         
-                # Check 3: Base is missing a suffix (e.g. pumpkaboo -> pumpkaboo_average)
                 if not resolved:
                     matches = [k for k in valid_species_ids if k.startswith(fallback_id)]
                     if matches:
@@ -343,21 +333,31 @@ def build_pipeline():
                 
             moveset = []
             for m in entry.get("moveset", []):
-                # Resolve PvPoke's "rollout" back to our valid "rollout_fast" mapping
-                m_low = pvpoke_move_resolver.get(m.lower(), m.lower())
+                m_low = m.lower()
+                if m_low == "none":
+                    continue
+                
+                # Resolving custom PvPoke IDs
+                if m_low.startswith("hidden_power_"):
+                    m_low = "hidden_power_fast"
+                elif m_low.startswith("aegislash_"):
+                    m_low = re.sub(r"^aegislash_(charge|shield)_", "", m_low)
+                    
+                m_low = pvpoke_move_resolver.get(m_low, m_low)
                 if m_low in valid_moves:
                     moveset.append(m_low)
 
-            # Validation 2: Ensure fast move is present at index 0 and resolves correctly
-            if not moveset or not moveset[0].endswith("_fast"):
-                raise ValueError(f"CRITICAL: Moveset {moveset} for '{base_id}' in {league} is missing a fast move at position 0!")
+            # Validation 2: Enforce strict [fast, charged1, charged2] client rule
+            # Non-viable Pokémon (like Unown) with fewer than 3 valid moves are dropped entirely
+            if len(moveset) < 3 or not moveset[0].endswith("_fast"):
+                continue
 
             league_arr.append({
                 "id": base_id,
                 "shadow": is_shadow,
                 "rank": idx,
                 "score": entry.get("score", 0.0),
-                "moveset": moveset
+                "moveset": moveset[:3]
             })
             
         rankings_output[league] = sorted(league_arr, key=lambda x: x["rank"])
