@@ -248,26 +248,28 @@ def build_pipeline():
             if target_id not in valid_species_ids:
                 resolved = False
                 
-                # Try 1: Target is missing a suffix (e.g. target="pumpkaboo" -> known="pumpkaboo_average")
-                extensions = [k for k in valid_species_ids if k.startswith(target_id + "_")]
-                if extensions:
-                    target_id = extensions[0]
-                    resolved = True
-                
-                # Try 2: Target has a suffix that was dropped as cosmetic (e.g. target="dudunsparce_two" -> known="dudunsparce")
-                if not resolved:
-                    bases = sorted([k for k in valid_species_ids if target_id.startswith(k + "_")], key=len, reverse=True)
-                    if bases:
-                        target_id = bases[0]
-                        resolved = True
-                        
-                # Try 3: Use the raw fallback_id just in case
-                if not resolved and fallback_id in valid_species_ids:
+                # 1. Check if the fallback base exists directly (e.g., dudunsparce)
+                if fallback_id in valid_species_ids:
                     target_id = fallback_id
                     resolved = True
-                    
+                
+                # 2. Check if the target is just missing a Niantic suffix (e.g., dudunsparce_two -> dudunsparce_two_segment)
                 if not resolved:
-                    raise ValueError(f"CRITICAL: Evolution target '{target_id}' from '{s['id']}' does not resolve to a known species!")
+                    matches = [k for k in valid_species_ids if k.startswith(target_id)]
+                    if matches:
+                        target_id = matches[0]
+                        resolved = True
+                        
+                # 3. Check if base is missing a suffix (e.g., pumpkaboo -> pumpkaboo_average)
+                if not resolved:
+                    matches = [k for k in valid_species_ids if k.startswith(fallback_id)]
+                    if matches:
+                        target_id = sorted(matches)[0]
+                        resolved = True
+                        
+                if not resolved:
+                    # CHANGED STRING: If this error doesn't say "(base:", you know GitHub isn't running the latest code!
+                    raise ValueError(f"CRITICAL: Target '{target_id}' (base: {fallback_id}) from '{s['id']}' doesn't resolve!")
             
             # Deduplicate (so Dudunsparce only shows one unified evolution edge)
             if target_id not in seen_evos:
