@@ -1,6 +1,7 @@
 import json
 import re
 import urllib.request
+import datetime
 
 URL = "https://raw.githubusercontent.com/PokeMiners/game_masters/master/latest/latest.json"
 OUTPUT_FILE = "clean_pogo_data.json"
@@ -68,3 +69,12 @@ with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
     json.dump(clean_output, f, indent=2)
 
 print("Done! Saved to", OUTPUT_FILE)
+
+# add version.json
+version_data = {
+    "version": int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+    "lastUpdated": datetime.datetime.now(datetime.timezone.utc).isoformat()
+}
+
+with open("version.json", "w", encoding="utf-8") as f:
+    json.dump(version_data, f, indent=2)
