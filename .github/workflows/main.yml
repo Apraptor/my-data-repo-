@@ -1,36 +1,165 @@
-name: Update Pokémon GO & PvPoke Data
+import hashlib
+import json
+import os
+import re
+import urllib.request
+from datetime import datetime, timezone
 
-on:
-  schedule:
-    - cron: '0 6 * * *'
-  workflow_dispatch:
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+STATE_FILE = "version.json"
 
-permissions:
-  contents: write
 
-jobs:
-  sync-data:
-    runs-on: ubuntu-latest
+def fetch_bytes(url: str) -> bytes:
+    req = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(req) as response:
+        return response.read()
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Fetches full history so git push / rebase never gets rejected
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+def load_state() -> dict:
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "pogoDataTimestamp": "",
+        "pogoDataVersion": 0,
+        "metaRankingsHash": "",
+        "metaRankingsVersion": 0,
+        "lastUpdated": ""
+    }
 
-      - name: Run Update Script
-        run: python3 sync_game_data.py
 
-      - name: Commit and Push Changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Auto-update Pokémon GO & PvPoke game data [skip ci]"
-          file_pattern: "clean_pogo_data.json meta_rankings.json version.json"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+def update_pogo_data(state: dict) -> bool:
+    ts_url = "https://raw.githubusercontent.com/PokeMiners/game_masters/master/latest/timestamp.txt"
+    gm_url = "https://raw.githubusercontent.com/PokeMiners/game_masters/master/latest/latest.json"
+
+    print("[1/2] Checking PokeMiners Game Master...")
+    latest_ts = fetch_bytes(ts_url).decode("utf-8").strip()
+
+    if latest_ts == state.get("pogoDataTimestamp") and os.path.exists("clean_pogo_data.json"):
+        print(f"  -> No Game Master changes (Timestamp: {latest_ts}). Skipping.")
+        return False
+
+    print(f"  -> New Game Master detected ({latest_ts}). Processing...")
+    raw_json = json.loads(fetch_bytes(gm_url).decode("utf-8"))
+
+    pokemon_list = []
+    moves_list = []
+    settings = {}
+
+    pokemon_pattern = re.compile(r"^V\d{4}_POKEMON_")
+    move_pattern = re.compile(r"^V\d{4}_MOVE_")
+
+    for entry in raw_json:
+        tid = entry.get("templateId", "")
+        data = entry.get("data", {})
+
+        if pokemon_pattern.match(tid):
+            p_settings = data.get("pokemonSettings")
+            if p_settings:
+                pokemon_list.append({
+                    "templateId": tid,
+                    "pokemonId": p_settings.get("pokemonId"),
+                    "form": p_settings.get("form"),
+                    "type": p_settings.get("type"),
+                    "type2": p_settings.get("type2"),
+                    "stats": p_settings.get("stats"),
+                    "quickMoves": p_settings.get("quickMoves", []),
+                    "cinematicMoves": p_settings.get("cinematicMoves", []),
+                    "eliteQuickMove": p_settings.get("eliteQuickMove", []),
+                    "eliteCinematicMove": p_settings.get("eliteCinematicMove", []),
+                    "evolutionBranch": p_settings.get("evolutionBranch", []),
+                    "temporaryEvolutionBranch": p_settings.get("temporaryEvolutionBranch", []),
+                    "familyId": p_settings.get("familyId")
+                })
+
+        elif move_pattern.match(tid):
+            m_settings = data.get("moveSettings")
+            if m_settings:
+                moves_list.append({
+                    "templateId": tid,
+                    "movementId": m_settings.get("movementId"),
+                    "pokemonType": m_settings.get("pokemonType"),
+                    "power": m_settings.get("power", 0),
+                    "energyDelta": m_settings.get("energyDelta", 0),
+                    "durationMs": m_settings.get("durationMs", 0),
+                    "damageWindowStartMs": m_settings.get("damageWindowStartMs", 0),
+                    "damageWindowEndMs": m_settings.get("damageWindowEndMs", 0)
+                })
+
+        elif tid in ["POKEMON_UPGRADE_SETTINGS", "COMBAT_SETTINGS", "PLAYER_LEVEL_SETTINGS"]:
+            settings[tid] = data
+
+    clean_payload = {
+        "pokemon": pokemon_list,
+        "moves": moves_list,
+        "settings": settings
+    }
+
+    with open("clean_pogo_data.json", "w", encoding="utf-8") as f:
+        json.dump(clean_payload, f, separators=(",", ":"))
+
+    state["pogoDataTimestamp"] = latest_ts
+    state["pogoDataVersion"] = int(datetime.now(timezone.utc).timestamp())
+    print("  -> Saved updated clean_pogo_data.json.")
+    return True
+
+
+def update_pvpoke_rankings(state: dict) -> bool:
+    leagues = {
+        "great": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/all/overall/rankings-1500.json",
+        "ultra": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/all/overall/rankings-2500.json"
+    }
+
+    formatted_rankings = {}
+
+    print("[2/2] Checking PvPoke rankings for Great and Ultra Leagues...")
+    for league_name, url in leagues.items():
+        raw_data = fetch_bytes(url)
+        league_json = json.loads(raw_data.decode("utf-8"))
+
+        league_dict = {}
+        for idx, entry in enumerate(league_json, start=1):
+            species_id = entry.get("speciesId")
+            if not species_id:
+                continue
+
+            league_dict[species_id] = {
+                "rank": idx,
+                "score": entry.get("score", 0.0),
+                "moveset": entry.get("moveset", [])
+            }
+
+        formatted_rankings[league_name] = league_dict
+
+    serialized_data = json.dumps(formatted_rankings, separators=(",", ":")).encode("utf-8")
+    new_hash = hashlib.sha256(serialized_data).hexdigest()
+
+    if new_hash == state.get("metaRankingsHash") and os.path.exists("meta_rankings.json"):
+        print(f"  -> No PvPoke ranking changes (SHA: {new_hash[:8]}...). Skipping.")
+        return False
+
+    print(f"  -> New PvPoke ranking data detected (SHA: {new_hash[:8]}...). Writing file...")
+    with open("meta_rankings.json", "wb") as f:
+        f.write(serialized_data)
+
+    state["metaRankingsHash"] = new_hash
+    state["metaRankingsVersion"] = int(datetime.now(timezone.utc).timestamp())
+    print("  -> Saved updated meta_rankings.json.")
+    return True
+
+
+if __name__ == "__main__":
+    state = load_state()
+    pogo_changed = update_pogo_data(state)
+    pvpoke_changed = update_pvpoke_rankings(state)
+
+    if pogo_changed or pvpoke_changed or not os.path.exists(STATE_FILE):
+        state["lastUpdated"] = datetime.now(timezone.utc).isoformat()
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        print("\nUpdated version.json metadata state.")
+    else:
+        print("\nAll datasets up to date. No changes written.")
