@@ -243,14 +243,23 @@ def build_pipeline():
             target_id = evo["id"]
             fallback_id = evo.pop("fallback_id", target_id) # Remove fallback_id from final JSON
             
-            # If specific form was collapsed, fallback to base species
             if target_id not in valid_species_ids:
-                if fallback_id in valid_species_ids:
+                # 1. Niantic arbitrarily shortens strings (e.g. 'dudunsparce_two' -> 'dudunsparce_two_segment')
+                partial_matches = [k for k in valid_species_ids if k.startswith(target_id)]
+                if partial_matches:
+                    target_id = partial_matches[0]
+                # 2. If specific form was collapsed, fallback to base species
+                elif fallback_id in valid_species_ids:
                     target_id = fallback_id
+                # 3. If base species doesn't exist (e.g. multi-form only species), grab the first valid form
                 else:
-                    raise ValueError(f"CRITICAL: Evolution target '{target_id}' from '{s['id']}' does not resolve to a known species!")
+                    form_candidates = [k for k in valid_species_ids if k.startswith(f"{fallback_id}_")]
+                    if form_candidates:
+                        target_id = sorted(form_candidates)[0]
+                    else:
+                        raise ValueError(f"CRITICAL: Evolution target '{target_id}' from '{s['id']}' does not resolve to a known species!")
             
-            # Deduplicate (so Dudunsparce only shows one evolution to Dudunsparce)
+            # Deduplicate (so Dudunsparce only shows one evolution edge)
             if target_id not in seen_evos:
                 evo["id"] = target_id
                 valid_evos.append(evo)
