@@ -86,7 +86,6 @@ def build_pipeline():
             else:
                 move_obj["energyCost"] = abs(energy_delta)
                 
-            buffs = m.get("vfxName", "")
             moves_list.append(move_obj)
 
     valid_moves = {m["id"] for m in moves_list}
@@ -180,7 +179,7 @@ def build_pipeline():
             evos = current_species.get("evolutions", [])
             for evo in p.get("evolutionBranch", []):
                 if not isinstance(evo, dict): continue
-                if "temporaryEvolution" in evo: continue # handled below
+                if "temporaryEvolution" in evo: continue 
                 
                 evo_id_raw = evo.get("form", evo.get("evolution", "")).lower()
                 if not evo_id_raw or "mega" in evo_id_raw or "primal" in evo_id_raw: continue
@@ -192,7 +191,8 @@ def build_pipeline():
                 
                 evo_id = f"{evo_base}_{evo_form_part}" if evo_form_part else evo_base
                 
-                e_obj = {"id": evo_id, "candy": evo.get("candyCost", 0)}
+                # Save a fallback_id for remapping cosmetic duplicates during validation
+                e_obj = {"id": evo_id, "fallback_id": evo_base, "candy": evo.get("candyCost", 0)}
                 if "candyCostPurified" in evo: e_obj["candyPurified"] = evo["candyCostPurified"]
                 if "evolutionItemRequirement" in evo: e_obj["item"] = evo["evolutionItemRequirement"].replace("ITEM_", "").lower()
                 if "kmBuddyDistanceRequirement" in evo: e_obj["kmBuddy"] = evo["kmBuddyDistanceRequirement"]
@@ -232,16 +232,30 @@ def build_pipeline():
             if megas:
                 current_species["megaEvolutions"] = megas
 
-    # Validation 1: Fail-fast if evolution targets don't resolve
+    # Validation 1: Fail-fast if evolution targets don't resolve (and remap cosmetic forms)
     valid_species_ids = set(species_map.keys())
     species_list = list(species_map.values())
     
     for s in species_list:
         valid_evos = []
+        seen_evos = set()
         for evo in s.get("evolutions", []):
-            if evo["id"] not in valid_species_ids:
-                raise ValueError(f"CRITICAL: Evolution target '{evo['id']}' from '{s['id']}' does not resolve to a known species!")
-            valid_evos.append(evo)
+            target_id = evo["id"]
+            fallback_id = evo.pop("fallback_id", target_id) # Remove fallback_id from final JSON
+            
+            # If specific form was collapsed, fallback to base species
+            if target_id not in valid_species_ids:
+                if fallback_id in valid_species_ids:
+                    target_id = fallback_id
+                else:
+                    raise ValueError(f"CRITICAL: Evolution target '{target_id}' from '{s['id']}' does not resolve to a known species!")
+            
+            # Deduplicate (so Dudunsparce only shows one evolution to Dudunsparce)
+            if target_id not in seen_evos:
+                evo["id"] = target_id
+                valid_evos.append(evo)
+                seen_evos.add(target_id)
+                
         s["evolutions"] = valid_evos
 
 
@@ -283,7 +297,7 @@ def build_pipeline():
             league_arr.append({
                 "id": base_id,
                 "shadow": is_shadow,
-                "rank": idx, # Original PvPoke rank logic handles the sorting correctly
+                "rank": idx,
                 "score": entry.get("score", 0.0),
                 "moveset": moveset
             })
