@@ -109,8 +109,8 @@ def update_pogo_data(state: dict) -> bool:
 
 def update_pvpoke_rankings(state: dict) -> bool:
     leagues = {
-        "great": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/all/overall/rankings-1500.json",
-        "ultra": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/all/overall/rankings-2500.json"
+        "great": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-1500.json",
+        "ultra": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-2500.json"
     }
 
     formatted_rankings = {}
