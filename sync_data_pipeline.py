@@ -232,7 +232,9 @@ def build_pipeline():
             if megas:
                 current_species["megaEvolutions"] = megas
 
-    # Validation 1: Fail-fast if evolution targets don't resolve (and remap cosmetic forms)
+    # ---------------------------------------------------------
+    # Validation 1: Fail-fast and remap cosmetic forms
+    # ---------------------------------------------------------
     valid_species_ids = set(species_map.keys())
     species_list = list(species_map.values())
     
@@ -241,32 +243,39 @@ def build_pipeline():
         seen_evos = set()
         for evo in s.get("evolutions", []):
             target_id = evo["id"]
-            fallback_id = evo.pop("fallback_id", target_id) # Remove fallback_id from final JSON
+            fallback_id = evo.pop("fallback_id", target_id)
             
             if target_id not in valid_species_ids:
-                # 1. Niantic arbitrarily shortens strings (e.g. 'dudunsparce_two' -> 'dudunsparce_two_segment')
-                partial_matches = [k for k in valid_species_ids if k.startswith(target_id)]
-                if partial_matches:
-                    target_id = partial_matches[0]
-                # 2. If specific form was collapsed, fallback to base species
-                elif fallback_id in valid_species_ids:
+                resolved = False
+                
+                # Try 1: Target is missing a suffix (e.g. target="pumpkaboo" -> known="pumpkaboo_average")
+                extensions = [k for k in valid_species_ids if k.startswith(target_id + "_")]
+                if extensions:
+                    target_id = extensions[0]
+                    resolved = True
+                
+                # Try 2: Target has a suffix that was dropped as cosmetic (e.g. target="dudunsparce_two" -> known="dudunsparce")
+                if not resolved:
+                    bases = sorted([k for k in valid_species_ids if target_id.startswith(k + "_")], key=len, reverse=True)
+                    if bases:
+                        target_id = bases[0]
+                        resolved = True
+                        
+                # Try 3: Use the raw fallback_id just in case
+                if not resolved and fallback_id in valid_species_ids:
                     target_id = fallback_id
-                # 3. If base species doesn't exist (e.g. multi-form only species), grab the first valid form
-                else:
-                    form_candidates = [k for k in valid_species_ids if k.startswith(f"{fallback_id}_")]
-                    if form_candidates:
-                        target_id = sorted(form_candidates)[0]
-                    else:
-                        raise ValueError(f"CRITICAL: Evolution target '{target_id}' from '{s['id']}' does not resolve to a known species!")
+                    resolved = True
+                    
+                if not resolved:
+                    raise ValueError(f"CRITICAL: Evolution target '{target_id}' from '{s['id']}' does not resolve to a known species!")
             
-            # Deduplicate (so Dudunsparce only shows one evolution edge)
+            # Deduplicate (so Dudunsparce only shows one unified evolution edge)
             if target_id not in seen_evos:
                 evo["id"] = target_id
                 valid_evos.append(evo)
                 seen_evos.add(target_id)
                 
         s["evolutions"] = valid_evos
-
 
     with open("pogo_moves.json", "w", encoding="utf-8") as f:
         json.dump({"schemaVersion": 1, "generated": timestamp, "moves": moves_list}, f, separators=(',', ':'))
@@ -295,7 +304,7 @@ def build_pipeline():
             
             # Validation 2: Ensure PvPoke species and moves resolve cleanly
             if base_id not in valid_species_ids:
-                continue # Skip gracefully if PvPoke tracks an unreleased mon
+                continue 
                 
             moveset = []
             for m in entry.get("moveset", []):
@@ -311,7 +320,6 @@ def build_pipeline():
                 "moveset": moveset
             })
             
-        # Ensure array is sorted strictly by rank ascending
         rankings_output[league] = sorted(league_arr, key=lambda x: x["rank"])
 
     with open("pogo_meta_rankings.json", "w", encoding="utf-8") as f:
