@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import re
@@ -22,27 +21,22 @@ def load_state() -> dict:
                 return json.load(f)
         except Exception:
             pass
-    return {
-        "pogoDataTimestamp": "",
-        "pogoDataVersion": 0,
-        "metaRankingsHash": "",
-        "metaRankingsVersion": 0,
-        "lastUpdated": ""
-    }
+    return {}
 
 
-def update_pogo_data(state: dict) -> bool:
+def main():
+    state = load_state()
     ts_url = "https://raw.githubusercontent.com/PokeMiners/game_masters/master/latest/timestamp.txt"
     gm_url = "https://raw.githubusercontent.com/PokeMiners/game_masters/master/latest/latest.json"
 
-    print("[1/2] Checking PokeMiners Game Master...")
+    print("Checking PokeMiners Game Master timestamp...")
     latest_ts = fetch_bytes(ts_url).decode("utf-8").strip()
 
     if latest_ts == state.get("pogoDataTimestamp") and os.path.exists("clean_pogo_data.json"):
-        print(f"  -> No Game Master changes (Timestamp: {latest_ts}). Skipping.")
-        return False
+        print(f"No Game Master changes (Timestamp: {latest_ts}). Exiting.")
+        return
 
-    print(f"  -> New Game Master detected ({latest_ts}). Processing...")
+    print(f"New Game Master detected ({latest_ts}). Downloading and filtering...")
     raw_json = json.loads(fetch_bytes(gm_url).decode("utf-8"))
 
     pokemon_list = []
@@ -103,64 +97,13 @@ def update_pogo_data(state: dict) -> bool:
 
     state["pogoDataTimestamp"] = latest_ts
     state["pogoDataVersion"] = int(datetime.now(timezone.utc).timestamp())
-    print("  -> Saved updated clean_pogo_data.json.")
-    return True
+    state["lastUpdated"] = datetime.now(timezone.utc).isoformat()
 
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
 
-def update_pvpoke_rankings(state: dict) -> bool:
-    leagues = {
-        "great": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-1500.json",
-        "ultra": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-2500.json"
-    }
-
-    formatted_rankings = {}
-
-    print("[2/2] Checking PvPoke rankings for Great and Ultra Leagues...")
-    for league_name, url in leagues.items():
-        raw_data = fetch_bytes(url)
-        league_json = json.loads(raw_data.decode("utf-8"))
-
-        league_dict = {}
-        for idx, entry in enumerate(league_json, start=1):
-            species_id = entry.get("speciesId")
-            if not species_id:
-                continue
-
-            league_dict[species_id] = {
-                "rank": idx,
-                "score": entry.get("score", 0.0),
-                "moveset": entry.get("moveset", [])
-            }
-
-        formatted_rankings[league_name] = league_dict
-
-    # Serialize without extra whitespace to minimize size
-    serialized_data = json.dumps(formatted_rankings, separators=(",", ":")).encode("utf-8")
-    new_hash = hashlib.sha256(serialized_data).hexdigest()
-
-    if new_hash == state.get("metaRankingsHash") and os.path.exists("meta_rankings.json"):
-        print(f"  -> No PvPoke ranking changes (SHA: {new_hash[:8]}...). Skipping.")
-        return False
-
-    print(f"  -> New PvPoke ranking data detected (SHA: {new_hash[:8]}...). Writing file...")
-    with open("meta_rankings.json", "wb") as f:
-        f.write(serialized_data)
-
-    state["metaRankingsHash"] = new_hash
-    state["metaRankingsVersion"] = int(datetime.now(timezone.utc).timestamp())
-    print("  -> Saved updated meta_rankings.json.")
-    return True
+    print("Successfully updated clean_pogo_data.json and version.json.")
 
 
 if __name__ == "__main__":
-    state = load_state()
-    pogo_changed = update_pogo_data(state)
-    pvpoke_changed = update_pvpoke_rankings(state)
-
-    if pogo_changed or pvpoke_changed or not os.path.exists(STATE_FILE):
-        state["lastUpdated"] = datetime.now(timezone.utc).isoformat()
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-        print("\nUpdated version.json metadata state.")
-    else:
-        print("\nAll datasets up to date. No changes written.")
+    main()
