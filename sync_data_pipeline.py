@@ -49,8 +49,25 @@ def get_file_stats(filename: str) -> dict:
 
 def build_pipeline():
     print("Fetching Game Master and PvPoke datasets...")
+    
+    # ---------------------------------------------------------
+    # 0. FETCH, HASH, AND CHECK FOR CHANGES
+    # ---------------------------------------------------------
+    prev_index = {}
+    if os.path.exists(INDEX_FILE):
+        with open(INDEX_FILE, "r", encoding="utf-8") as f:
+            try:
+                prev_index = json.load(f)
+            except json.JSONDecodeError:
+                pass
+                
+    prev_source_hashes = prev_index.get("sourceHashes", {})
+    current_source_hashes = {}
+    
     gm_url = "https://raw.githubusercontent.com/PokeMiners/game_masters/master/latest/latest.json"
-    raw_gm = json.loads(fetch_bytes(gm_url).decode("utf-8"))
+    raw_gm_bytes = fetch_bytes(gm_url)
+    current_source_hashes["gm"] = hashlib.sha256(raw_gm_bytes).hexdigest()
+    raw_gm = json.loads(raw_gm_bytes.decode("utf-8"))
 
     pvpoke_urls = {
         "little": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-500.json",
@@ -58,6 +75,25 @@ def build_pipeline():
         "ultra": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-2500.json",
         "master": "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-10000.json"
     }
+    
+    pvpoke_jsons = {}
+    for league, url in pvpoke_urls.items():
+        try:
+            raw_data = fetch_bytes(url)
+            current_source_hashes[league] = hashlib.sha256(raw_data).hexdigest()
+            pvpoke_jsons[league] = json.loads(raw_data.decode("utf-8"))
+        except Exception:
+            continue
+
+    # Verify our output files are actually still there just in case they were deleted manually
+    output_files = ["pogo_core.json", "pogo_moves.json", "pogo_meta_rankings.json", INDEX_FILE]
+    all_outputs_exist = all(os.path.exists(f) for f in output_files)
+
+    if all_outputs_exist and prev_source_hashes == current_source_hashes:
+        print("No upstream changes detected. Skipping generation.")
+        return
+
+    print("Upstream changes detected (or missing files). Generating new data...")
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     
     # ---------------------------------------------------------
@@ -314,13 +350,9 @@ def build_pipeline():
     # 3. PARSE RANKINGS
     # ---------------------------------------------------------
     rankings_output = {}
-    for league, url in pvpoke_urls.items():
-        try:
-            raw_data = fetch_bytes(url)
-            league_json = json.loads(raw_data.decode("utf-8"))
-        except Exception:
-            continue
-            
+    
+    # We now iterate over the jsons we successfully fetched and hashed in step 0
+    for league, league_json in pvpoke_jsons.items():
         league_arr = []
         for idx, entry in enumerate(league_json, start=1):
             species_id = entry.get("speciesId", "")
@@ -372,7 +404,7 @@ def build_pipeline():
     manifest = {
         "schemaVersion": 1,
         "generated": timestamp,
-        "gameMasterCommit": "latest",
+        "sourceHashes": current_source_hashes,  # <--- Note the added payload here
         "files": {
             "core": get_file_stats("pogo_core.json"),
             "moves": get_file_stats("pogo_moves.json"),
