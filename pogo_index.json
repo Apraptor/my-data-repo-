@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
-  "generated": "2026-09-01T11:53:30Z",
+  "generated": "2026-09-02T11:34:40Z",
   "gameMasterCommit": "latest",
   "files": {
     "core": {
       "url": "pogo_core.json",
-      "sha256": "f01d52c5bd8b180e853da444cc9b25a00f739db2c04875ade641191697dd5a49",
+      "sha256": "06e575152fb82901bf91410f584b30a9690537d097711bb6d31b8c213c64bc93",
       "sizeBytes": 342931
     },
     "moves": {
       "url": "pogo_moves.json",
-      "sha256": "424bc81baabcbfaac695376a440d3c79c37c8103f11ba7848e7307eb4578f09a",
+      "sha256": "3be0928352d002bc89321cfd75724dc5286a84a42b5db642558055e1279e8438",
       "sizeBytes": 39815
     },
     "rankings": {
       "url": "pogo_meta_rankings.json",
-      "sha256": "11eb8a718b07324ec0c0cf8839c7d7690eb360c8dbdd5407faf90855ce35153e",
+      "sha256": "5fa1990061cd2b4e98c3587861b0bf226571b2ff6ef67f787b95973105ce7f45",
       "sizeBytes": 255437
     }
   }
