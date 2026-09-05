@@ -419,3 +419,9 @@ def build_pipeline():
 
 if __name__ == "__main__":
     build_pipeline()
+    
+    # --- LOG THE RUN ---
+    # This will append a line to 'run_log.txt' every time the script successfully finishes.
+    with open("run_log.txt", "a", encoding="utf-8") as log_file:
+        timestamp_now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        log_file.write(f"Script ran successfully on: {timestamp_now}\n")
