@@ -1,28 +1,28 @@
 {
   "schemaVersion": 1,
-  "generated": "2026-10-02T12:59:06Z",
+  "generated": "2026-10-10T12:52:15Z",
   "sourceHashes": {
     "gm": "5c947ac64d1de8859bea1b3bf044609d74b6e8429d53f8cb1aa30a72a46dce84",
     "little": "da6d8eddc987d120709d77bdb3eb96df247897bd80f2cb704a5a292368fb3c4f",
-    "great": "0152473e1370bbcbf85b0893e78226950c820cf7dfe6a47f42cb0def6cd9a80e",
-    "ultra": "fff58856ddb679c7883957944510be5973a4444b2485ee83f1555177761998c2",
+    "great": "219a42dfc1f9baff1de534f667f88b71d4f6acb0533125a3cb00719e01230c28",
+    "ultra": "dfd77859a71f6e36a4225b5d55b3c3e0752ecf3441b1745d77c8a4e9cf644413",
     "master": "a833c11245224edc38bb21a7919998e08d955dfd12752b2891a03baf573219a1"
   },
   "files": {
     "core": {
       "url": "pogo_core.json",
-      "sha256": "d131bedb6e3278a8f05ec0d5b438b0f2c2265d57b4a6e80c24830780be229e57",
+      "sha256": "6555e61cf644898b1c06d8fed61c73b492b9062f52cc0de0366e940cfda296b0",
       "sizeBytes": 342931
     },
     "moves": {
       "url": "pogo_moves.json",
-      "sha256": "012f6e0874d46307f427edf327152bde1927dda15f3fdb2b1ed69646f048593e",
+      "sha256": "8812d396cdd65adf52cdd8c60787e51423238b09a6577dab8adccafbf09e703e",
       "sizeBytes": 39815
     },
     "rankings": {
       "url": "pogo_meta_rankings.json",
-      "sha256": "e618335d931ba4e96573387ee6ca7b787832e0063cee4d7c518d475a209c9800",
-      "sizeBytes": 275214
+      "sha256": "d137a5e14c7560ab292aafaf74b4bfc32dcf76939e0c1b7a2d1948dd060c6884",
+      "sizeBytes": 275247
     }
   }
 }
